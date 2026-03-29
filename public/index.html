@@ -1679,8 +1679,7 @@ async function sendViaGmail() {
 
   // Step 1 — ask Claude to write a personalised intro paragraph
   const client    = safeVal('f-bill-to') || safeVal('f-client') || safeVal('f-client-search') || '';
-  const firstName = client.split(/
-/)[0].split(' ')[0];
+  const firstName = client.split(/\n/)[0].split(' ')[0];
   const estNum    = safeVal('f-enum') || '—';
   const account   = safeVal('f-account') || (currentItemData && currentItemData.acct) || '';
   const project   = safeVal('f-project') || (currentItemData && currentItemData.proj) || '';

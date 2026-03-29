@@ -114,7 +114,7 @@ body{background:var(--dark);color:var(--body);font-family:'DM Sans',sans-serif;f
 }
 
 /* Header row: from-info left, logo right */
-.est-hdr{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:44px}
+.est-hdr{display:flex;flex-direction:row;justify-content:space-between;align-items:flex-start;margin-bottom:44px;width:100%}
 .est-from .est-label{
   font-size:13px;font-weight:700;color:var(--pdf-green);
   letter-spacing:.5px;margin-bottom:14px;display:block
@@ -124,7 +124,7 @@ body{background:var(--dark);color:var(--body);font-family:'DM Sans',sans-serif;f
 .est-from a{color:#444;text-decoration:none}
 
 /* Real logo — right-aligned, same size as PDF */
-.est-logo-wrap{flex-shrink:0;margin-left:24px}
+.est-logo-wrap{flex-shrink:0;margin-left:auto;text-align:right}
 .est-logo-wrap img{width:160px;height:auto;display:block}
 
 /* Bill-to / details band */
@@ -134,7 +134,7 @@ body{background:var(--dark);color:var(--body);font-family:'DM Sans',sans-serif;f
 .meta-val strong{color:#111;font-weight:600}
 .tracking-line{font-size:11px;color:#aaa;font-family:'DM Mono',monospace;margin-bottom:6px;text-align:right}
 .est-detail-rows{display:flex;flex-direction:column;gap:3px}
-.edr{display:flex;justify-content:space-between;font-size:12px}
+.edr{display:flex;justify-content:space-between;font-size:12px;padding:2px 0;gap:12px}
 .edr .edr-k{color:#888}
 .edr .edr-v{color:#111;font-weight:500;font-family:'DM Mono',monospace;font-size:11px}
 
@@ -842,7 +842,7 @@ function render() {
       Clicking "Accept Estimate" will record your acceptance, update the Monday.com project status to <em>Estimate Approved</em>, and notify the HANDS Logistics team.
 
     </div>
-    <button class="accept-btn" id="accept-btn" onclick="acceptEstimate()" ${!hasToken||!hasItemId ? 'disabled' : ''}>
+    <button class="accept-btn" id="accept-btn" onclick="acceptEstimate()" ${!hasToken ? 'disabled' : ''}>
       ✓ Accept Estimate
     </button>
   </div>
@@ -875,7 +875,8 @@ async function acceptEstimate() {
   const dateStr = now.toISOString().slice(0,10);
   const timeStr = now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
 
-  if (!token || !itemId) return;
+  if (!token) { showToast('No Monday token configured', true); return; }
+  if (!itemId) { showToast('Enter a HANDS Tracking # to accept this estimate', true); return; }
 
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span>Updating Monday...';
@@ -922,6 +923,30 @@ async function acceptEstimate() {
       headers: {'Content-Type':'application/json','Authorization':token,'API-Version':'2023-04'},
       body: JSON.stringify({query: commentMutation})
     });
+
+    // Notify jon@handslogistics.com via Zapier
+    try {
+      await fetch(ZAPIER_WEBHOOK, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'estimate_accepted',
+          notify_email: 'jon@handslogistics.com',
+          subject: `✅ Estimate #${estNum} Accepted — ${client}`,
+          estimate_number: estNum,
+          client,
+          total: usd(subtotal),
+          monday_item_id: itemId,
+          accepted_by: client,
+          accepted_at: `${dateStr} at ${timeStr}`,
+          message: `Estimate #${estNum} for ${client} (Total: ${usd(subtotal)}) was accepted on ${dateStr} at ${timeStr}. Monday item #${itemId} has been updated to ESTIMATE APPROVED.`
+        })
+      });
+    } catch(zapErr) {
+      console.warn('Zapier notification failed:', zapErr);
+      // Don't block the UI update if Zapier fails
+    }
 
     // Update the UI to show accepted state
     btn.innerHTML = '✓ Estimate Accepted';
@@ -1302,12 +1327,12 @@ function buildEmailHTML() {
   const inlineCSS = `<style>
     @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono&display=swap');
     .est-doc{background:#fff;color:#333;max-width:760px;margin:0 auto;padding:56px 56px 48px;font-family:'DM Sans',Helvetica,Arial,sans-serif;line-height:1.5;font-size:13px}
-    .est-hdr{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:44px}
+    .est-hdr{display:flex;flex-direction:row;justify-content:space-between;align-items:flex-start;margin-bottom:44px;width:100%}
     .est-from .est-label{font-size:13px;font-weight:700;color:#3a7a5c;letter-spacing:.5px;margin-bottom:14px;display:block}
     .est-from address{font-style:normal;font-size:12px;color:#444;line-height:1.75}
     .est-from address strong{display:block;font-size:13px;color:#111;font-weight:600;margin-bottom:2px}
     .est-from a{color:#444;text-decoration:none}
-    .est-logo-wrap{flex-shrink:0;margin-left:24px}
+    .est-logo-wrap{flex-shrink:0;margin-left:auto;text-align:right}
     .est-logo-wrap img{width:145px!important;max-width:145px!important;height:auto;display:block;border:0}
     .est-meta{display:grid;grid-template-columns:1fr 1fr;gap:32px;padding:24px 0;border-top:1px solid #e8e8e8;border-bottom:1px solid #e8e8e8;margin-bottom:36px}
     .meta-label{font-size:10px;font-weight:700;color:#999;letter-spacing:1.4px;text-transform:uppercase;margin-bottom:8px}
@@ -1315,7 +1340,7 @@ function buildEmailHTML() {
     .meta-val strong{color:#111;font-weight:600}
     .tracking-line{font-size:11px;color:#aaa;font-family:monospace;margin-bottom:6px;text-align:right}
     .est-detail-rows{display:flex;flex-direction:column;gap:3px}
-    .edr{display:flex;justify-content:space-between;font-size:12px}
+    .edr{display:flex;justify-content:space-between;font-size:12px;padding:2px 0;gap:12px}
     .edr .edr-k{color:#888}
     .edr .edr-v{font-family:monospace;font-size:11px;color:#111;font-weight:500}
     .est-tbl{width:100%;border-collapse:collapse;margin-bottom:28px}
@@ -1693,27 +1718,24 @@ async function sendViaGmail() {
     const subtotal = lines.reduce((s,l) => s + l.qty * l.rate, 0);
     const itemId   = safeVal('f-tracking').trim();
 
-    const payload = {
-      to, cc, subject,
-      html_body: emailHTML,
-      client,
-      estimate_number: estNum,
-      estimate_total: usd(subtotal),
-      monday_item_id: itemId,
-      delivery_date: delDate,
-      delivery_address: address,
-      sent_at: new Date().toISOString()
-    };
-
-    // Zapier Catch Hook — CORS will give an opaque response, that's OK
     await fetch(ZAPIER_WEBHOOK, {
       method: 'POST',
       mode: 'no-cors',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        type: 'estimate_send',
+        to, cc, subject,
+        html_body: emailHTML,
+        client,
+        estimate_number: estNum,
+        estimate_total: usd(subtotal),
+        monday_item_id: itemId,
+        delivery_date: delDate,
+        delivery_address: address,
+        sent_at: new Date().toISOString()
+      })
     });
 
-    // Update Monday status
     await updateMondayEstimateReady(true);
 
     statusEl.textContent = `✓ Estimate #${estNum} sent to ${to}.`;
@@ -1810,7 +1832,7 @@ Estimate link: ${estimateURL}`;
 <div class="dc-modal-overlay" id="dc-modal-overlay" onclick="if(event.target===this)closeDCModal()">
   <div class="dc-modal" style="max-width:620px">
     <h3>Send Estimate + DC</h3>
-    <div class="dc-sub">Sends a branded HTML estimate + delivery confirmation directly to the client via Zapier. No copy-paste needed.</div>
+    <div class="dc-sub">Sends a branded HTML estimate + delivery confirmation directly to the client via Zapier.</div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div class="dc-field">

@@ -359,7 +359,7 @@ body{background:var(--dark);color:var(--body);font-family:'DM Sans',sans-serif;f
 // ── MONDAY TOKEN ──────────────────────────────────────────────────────────────
 const MONDAY_API = 'https://api.monday.com/v2';
 const MONDAY_TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjYzNjEzNzc5MSwiYWFpIjoxMSwidWlkIjoxNDk4NzI0NSwiaWFkIjoiMjAyNi0wMy0yMlQxNzoyNTo1MC4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6NjYxOTgxNSwicmduIjoidXNlMSJ9.RLTGytTbLaran19E20Ag8nzxdaWuwVKVZNx3fdvAIBQ';
-const ANTHROPIC_KEY = '' /* loaded server-side */;
+const ANTHROPIC_KEY = '' /* key moved to Netlify env — see /.netlify/functions/claude-email */;
 const SUBITEM_BOARD = 4550650927;
 const PARENT_BOARD  = 4550650855;
 
@@ -1126,7 +1126,7 @@ document.addEventListener('input', function(e) {
 });
 
 // ── SEND ESTIMATE + DELIVERY CONFIRMATION ────────────────────────────────────
-function buildEmailHTML() {
+function buildEmailHTML(aiIntro) {
   // Grab the live rendered estimate HTML
   const estDoc = document.getElementById('est-doc');
   const estHTML = estDoc ? estDoc.outerHTML : '<p>No estimate rendered.</p>';
@@ -1173,6 +1173,7 @@ function buildEmailHTML() {
         </tr>
         <tr>
           <td style="padding:36px 40px 0;">
+            ${aiIntro ? `<p style="margin:0 0 20px 0;font-size:14px;color:#333333;line-height:1.7;font-style:italic;border-left:3px solid #a0d6b4;padding-left:14px;">${aiIntro}</p>` : ''}
             <p style="margin:0 0 8px 0;font-size:22px;font-weight:800;color:#0a0a0a;letter-spacing:-0.5px;">Please confirm your delivery details.</p>
             <p style="margin:0 0 28px 0;font-size:14px;color:#444444;line-height:1.6;">Kindly review and reply to confirm so we can proceed with fulfillment.</p>
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;border:1px solid #d0d0d0;border-radius:6px;overflow:hidden;">
@@ -1659,12 +1660,7 @@ function applyItemData() {
 }
 
 
-// ── SEND VIA GMAIL (Anthropic API + Gmail MCP — direct, single-file) ────────
-// ── SEND VIA GMAIL: copy HTML then open Gmail compose ────────────────────────
-// Anthropic API is CORS-blocked from the browser. Best single-file approach:
-// 1) Copy the full HTML email to clipboard
-// 2) Open Gmail compose pre-filled with To/CC/Subject
-// User pastes (Ctrl+V) into the body — takes 2 seconds.
+// ── SEND VIA GMAIL — AI-powered intro via Netlify function ──────────────────
 async function sendViaGmail() {
   const statusEl = document.getElementById('dc-status');
   const to      = document.getElementById('dc-to').value.trim();
@@ -1677,12 +1673,38 @@ async function sendViaGmail() {
     return;
   }
 
-  statusEl.textContent = '⏳ Copying email and opening Gmail…';
+  statusEl.textContent = '✨ Writing your email intro with AI…';
   statusEl.className = 'dc-status ok';
+  statusEl.style.display = 'block';
 
-  const html = buildEmailHTML();
+  // Step 1 — ask Claude to write a personalised intro paragraph
+  const client    = safeVal('f-bill-to') || safeVal('f-client') || safeVal('f-client-search') || '';
+  const firstName = client.split(/
+/)[0].split(' ')[0];
+  const estNum    = safeVal('f-enum') || '—';
+  const account   = safeVal('f-account') || (currentItemData && currentItemData.acct) || '';
+  const project   = safeVal('f-project') || (currentItemData && currentItemData.proj) || '';
+  const po        = safeVal('f-tracking') || '';
+  const subtotal  = lines.reduce((s, l) => s + l.qty * l.rate, 0).toFixed(2);
 
-  // Step 1 — copy HTML to clipboard
+  let aiIntro = '';
+  try {
+    const aiRes = await fetch('/api/claude-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client, firstName, estNum, account, project, po, lines, subtotal })
+    });
+    const aiData = await aiRes.json();
+    aiIntro = aiData.emailBody || '';
+  } catch(e) {
+    // Silently fall back — email still works without the AI intro
+    aiIntro = '';
+  }
+
+  statusEl.textContent = '⏳ Preparing email…';
+
+  // Step 2 — build and copy HTML email
+  const html = buildEmailHTML(aiIntro);
   let copied = false;
   try {
     await navigator.clipboard.write([
@@ -1693,24 +1715,23 @@ async function sendViaGmail() {
     ]);
     copied = true;
   } catch(e) {
-    // Fallback — open in new window so user can copy manually
     const w = window.open('', '_blank');
     if (w) { w.document.write(html); w.document.close(); }
   }
 
-  // Step 2 — open Gmail compose pre-filled with To/CC/Subject
+  // Step 3 — open Gmail compose
   const gmailUrl = 'https://mail.google.com/mail/?view=cm&fs=1'
     + '&to=' + encodeURIComponent(to)
     + (cc ? '&cc=' + encodeURIComponent(cc) : '')
     + '&su=' + encodeURIComponent(subject);
   window.open(gmailUrl, '_blank');
 
-  // Step 3 — update Monday status
+  // Step 4 — update Monday status
   await updateMondayEstimateReady(true);
 
   statusEl.textContent = copied
-    ? '✓ HTML email copied + Gmail compose opened. Click the body and paste (Ctrl+V / ⌘V).'
-    : '✓ Gmail compose opened. Switch to the preview window, select all, copy, then paste into Gmail.';
+    ? '✓ AI-written email copied + Gmail compose opened. Paste (Ctrl+V / ⌘V) into the body.'
+    : '✓ Gmail compose opened. Copy from the preview window and paste into Gmail.';
   statusEl.className = 'dc-status ok';
 }
 

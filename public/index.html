@@ -360,6 +360,7 @@ body{background:var(--dark);color:var(--body);font-family:'DM Sans',sans-serif;f
 const MONDAY_API = 'https://api.monday.com/v2';
 const MONDAY_TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjYzNjEzNzc5MSwiYWFpIjoxMSwidWlkIjoxNDk4NzI0NSwiaWFkIjoiMjAyNi0wMy0yMlQxNzoyNTo1MC4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6NjYxOTgxNSwicmduIjoidXNlMSJ9.RLTGytTbLaran19E20Ag8nzxdaWuwVKVZNx3fdvAIBQ';
 // ANTHROPIC_KEY removed
+const ZAPIER_WEBHOOK = 'https://hooks.zapier.com/hooks/catch/9182863/unrmyhy/';
 const SUBITEM_BOARD = 4550650927;
 const PARENT_BOARD  = 4550650855;
 
@@ -1670,6 +1671,8 @@ async function sendViaGmail() {
   const to      = document.getElementById('dc-to').value.trim();
   const cc      = document.getElementById('dc-cc').value.trim();
   const subject = document.getElementById('dc-subject').value.trim();
+  const delDate = document.getElementById('dc-deldate').value;
+  const address = document.getElementById('dc-address').value.trim();
 
   if (!to) {
     statusEl.textContent = 'Please enter a client email address.';
@@ -1677,41 +1680,54 @@ async function sendViaGmail() {
     return;
   }
 
-  statusEl.textContent = '⏳ Copying email and opening Gmail…';
+  statusEl.textContent = '⏳ Sending estimate via Zapier…';
   statusEl.className = 'dc-status ok';
 
-  const html = buildEmailHTML();
+  const sendBtn = document.getElementById('dc-send-btn');
+  if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = 'Sending…'; }
 
-  // Step 1 — copy HTML to clipboard
-  let copied = false;
   try {
-    await navigator.clipboard.write([
-      new ClipboardItem({
-        'text/html':  new Blob([html], {type:'text/html'}),
-        'text/plain': new Blob([html], {type:'text/plain'})
-      })
-    ]);
-    copied = true;
+    const html = buildEmailHTML();
+    const client   = safeVal('f-bill-to') || safeVal('f-client') || safeVal('f-client-search') || 'Client';
+    const estNum   = safeVal('f-enum') || '—';
+    const subtotal = lines.reduce((s,l) => s + l.qty * l.rate, 0);
+    const itemId   = safeVal('f-tracking').trim();
+
+    const payload = {
+      to,
+      cc,
+      subject,
+      html_body: html,
+      client,
+      estimate_number: estNum,
+      estimate_total: usd(subtotal),
+      monday_item_id: itemId,
+      delivery_date: delDate,
+      delivery_address: address,
+      sent_at: new Date().toISOString()
+    };
+
+    const res = await fetch(ZAPIER_WEBHOOK, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok && res.status !== 0) throw new Error(`Zapier responded ${res.status}`);
+
+    // Update Monday status + post comment
+    await updateMondayEstimateReady(true);
+
+    statusEl.textContent = `✓ Estimate #${estNum} sent to ${to} via Zapier.`;
+    statusEl.className = 'dc-status ok';
+    if (sendBtn) { sendBtn.textContent = '✓ Sent'; }
+    showToast(`✓ Estimate sent to ${to}`);
+
   } catch(e) {
-    // Fallback — open in new window so user can copy manually
-    const w = window.open('', '_blank');
-    if (w) { w.document.write(html); w.document.close(); }
+    statusEl.textContent = 'Send failed: ' + e.message;
+    statusEl.className = 'dc-status err';
+    if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '✉ Send Estimate'; }
   }
-
-  // Step 2 — open Gmail compose pre-filled with To/CC/Subject
-  const gmailUrl = 'https://mail.google.com/mail/?view=cm&fs=1'
-    + '&to=' + encodeURIComponent(to)
-    + (cc ? '&cc=' + encodeURIComponent(cc) : '')
-    + '&su=' + encodeURIComponent(subject);
-  window.open(gmailUrl, '_blank');
-
-  // Step 3 — update Monday status
-  await updateMondayEstimateReady(true);
-
-  statusEl.textContent = copied
-    ? '✓ HTML email copied + Gmail compose opened. Click the body and paste (Ctrl+V / ⌘V).'
-    : '✓ Gmail compose opened. Switch to the preview window, select all, copy, then paste into Gmail.';
-  statusEl.className = 'dc-status ok';
 }
 
 // ── SAVE ESTIMATE TO MONDAY ───────────────────────────────────────────────────
@@ -1796,7 +1812,7 @@ Estimate link: ${estimateURL}`;
 <div class="dc-modal-overlay" id="dc-modal-overlay" onclick="if(event.target===this)closeDCModal()">
   <div class="dc-modal" style="max-width:620px">
     <h3>Send Estimate + DC</h3>
-    <div class="dc-sub">Generates a branded HTML email with the estimate and delivery confirmation request. Copy to clipboard, then paste into Gmail or Outlook.</div>
+    <div class="dc-sub">Fills in delivery details and sends a branded HTML estimate + delivery confirmation to the client automatically via Zapier.</div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div class="dc-field">
@@ -1830,8 +1846,8 @@ Estimate link: ${estimateURL}`;
     <div id="dc-status" class="dc-status"></div>
 
     <div class="dc-actions" style="flex-wrap:wrap;gap:8px">
-      <button class="dc-btn-send" onclick="sendViaGmail()" style="flex:1;min-width:160px;background:#1a73e8" title="Copies HTML email + opens Gmail compose. Paste into body.">✉ Copy + Open Gmail</button>
-      <button class="dc-btn-send" onclick="copyHTMLEmail()" style="flex:1;min-width:160px">📋 Copy HTML</button>
+      <button id="dc-send-btn" class="dc-btn-send" onclick="sendViaGmail()" style="flex:1;min-width:160px;background:#1a73e8">✉ Send Estimate</button>
+      
       <button onclick="saveEstimateToMonday()" style="flex:1;min-width:160px;padding:10px 14px;background:rgba(160,214,180,.12);border:1px solid var(--green-dk);border-radius:4px;color:var(--green);font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font-b)">⬡ Save to Monday</button>
       <button onclick="updateMondayEstimateReady()" style="flex:1;min-width:160px;padding:10px 14px;background:rgba(160,214,180,.12);border:1px solid var(--border);border-radius:4px;color:var(--muted);font-size:11px;cursor:pointer;font-family:var(--font-b)">⬡ Update Status Only</button>
       <button class="dc-btn-cancel" onclick="closeDCModal()" style="flex:0 0 auto">Cancel</button>

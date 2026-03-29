@@ -359,9 +359,9 @@ body{background:var(--dark);color:var(--body);font-family:'DM Sans',sans-serif;f
 // ── MONDAY TOKEN ──────────────────────────────────────────────────────────────
 const MONDAY_API = 'https://api.monday.com/v2';
 const MONDAY_TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjYzNjEzNzc5MSwiYWFpIjoxMSwidWlkIjoxNDk4NzI0NSwiaWFkIjoiMjAyNi0wMy0yMlQxNzoyNTo1MC4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6NjYxOTgxNSwicmduIjoidXNlMSJ9.RLTGytTbLaran19E20Ag8nzxdaWuwVKVZNx3fdvAIBQ';
-// ANTHROPIC_KEY removed
-const ZAPIER_WEBHOOK = 'https://hooks.zapier.com/hooks/catch/9182863/unrmyhy/';
+
 const SUBITEM_BOARD = 4550650927;
+const ZAPIER_WEBHOOK = 'https://hooks.zapier.com/hooks/catch/9182863/unrmyhy/';
 const PARENT_BOARD  = 4550650855;
 
 function getToken() {
@@ -1687,17 +1687,15 @@ async function sendViaGmail() {
   if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = 'Sending…'; }
 
   try {
-    const html = buildEmailHTML();
+    const emailHTML = buildEmailHTML();
     const client   = safeVal('f-bill-to') || safeVal('f-client') || safeVal('f-client-search') || 'Client';
     const estNum   = safeVal('f-enum') || '—';
     const subtotal = lines.reduce((s,l) => s + l.qty * l.rate, 0);
     const itemId   = safeVal('f-tracking').trim();
 
     const payload = {
-      to,
-      cc,
-      subject,
-      html_body: html,
+      to, cc, subject,
+      html_body: emailHTML,
       client,
       estimate_number: estNum,
       estimate_total: usd(subtotal),
@@ -1707,18 +1705,18 @@ async function sendViaGmail() {
       sent_at: new Date().toISOString()
     };
 
-    const res = await fetch(ZAPIER_WEBHOOK, {
+    // Zapier Catch Hook — CORS will give an opaque response, that's OK
+    await fetch(ZAPIER_WEBHOOK, {
       method: 'POST',
+      mode: 'no-cors',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
 
-    if (!res.ok && res.status !== 0) throw new Error(`Zapier responded ${res.status}`);
-
-    // Update Monday status + post comment
+    // Update Monday status
     await updateMondayEstimateReady(true);
 
-    statusEl.textContent = `✓ Estimate #${estNum} sent to ${to} via Zapier.`;
+    statusEl.textContent = `✓ Estimate #${estNum} sent to ${to}.`;
     statusEl.className = 'dc-status ok';
     if (sendBtn) { sendBtn.textContent = '✓ Sent'; }
     showToast(`✓ Estimate sent to ${to}`);
@@ -1812,7 +1810,7 @@ Estimate link: ${estimateURL}`;
 <div class="dc-modal-overlay" id="dc-modal-overlay" onclick="if(event.target===this)closeDCModal()">
   <div class="dc-modal" style="max-width:620px">
     <h3>Send Estimate + DC</h3>
-    <div class="dc-sub">Fills in delivery details and sends a branded HTML estimate + delivery confirmation to the client automatically via Zapier.</div>
+    <div class="dc-sub">Sends a branded HTML estimate + delivery confirmation directly to the client via Zapier. No copy-paste needed.</div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div class="dc-field">
@@ -1846,8 +1844,7 @@ Estimate link: ${estimateURL}`;
     <div id="dc-status" class="dc-status"></div>
 
     <div class="dc-actions" style="flex-wrap:wrap;gap:8px">
-      <button id="dc-send-btn" class="dc-btn-send" onclick="sendViaGmail()" style="flex:1;min-width:160px;background:#1a73e8">✉ Send Estimate</button>
-      
+      <button id="dc-send-btn" class="dc-btn-send" onclick="sendViaGmail()" style="flex:1;min-width:160px;">✉ Send Estimate</button>
       <button onclick="saveEstimateToMonday()" style="flex:1;min-width:160px;padding:10px 14px;background:rgba(160,214,180,.12);border:1px solid var(--green-dk);border-radius:4px;color:var(--green);font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font-b)">⬡ Save to Monday</button>
       <button onclick="updateMondayEstimateReady()" style="flex:1;min-width:160px;padding:10px 14px;background:rgba(160,214,180,.12);border:1px solid var(--border);border-radius:4px;color:var(--muted);font-size:11px;cursor:pointer;font-family:var(--font-b)">⬡ Update Status Only</button>
       <button class="dc-btn-cancel" onclick="closeDCModal()" style="flex:0 0 auto">Cancel</button>

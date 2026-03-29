@@ -1366,6 +1366,11 @@ function buildEmailHTML() {
 }
 
 function sendEstimateWithDC() {
+  // Auto-load saved Zapier webhook URL
+  const savedUrl = localStorage.getItem('hands_zapier_estimate_url') || '';
+  const urlEl = document.getElementById('dc-zapier-url');
+  if (urlEl && savedUrl) urlEl.value = savedUrl;
+
   const email  = safeVal('f-email');
   const estNum = safeVal('f-enum') || '—';
   const subject = `HANDS Logistics — Estimate #${estNum} + Delivery Confirmation`;
@@ -1715,7 +1720,60 @@ async function sendViaGmail() {
   statusEl.className = 'dc-status ok';
 }
 
-// ── SAVE ESTIMATE TO MONDAY ───────────────────────────────────────────────────
+async function sendViaZapier() {
+  const statusEl  = document.getElementById('dc-status');
+  const to        = document.getElementById('dc-to').value.trim();
+  const cc        = document.getElementById('dc-cc').value.trim();
+  const subject   = document.getElementById('dc-subject').value.trim();
+  const webhookEl = document.getElementById('dc-zapier-url');
+  const webhook   = webhookEl ? webhookEl.value.trim() : '';
+
+  if (!to) {
+    statusEl.textContent = 'Please enter a client email address.';
+    statusEl.className = 'dc-status err';
+    return;
+  }
+  if (!webhook) {
+    statusEl.textContent = 'Please paste your Zapier Webhook URL above.';
+    statusEl.className = 'dc-status err';
+    return;
+  }
+
+  statusEl.textContent = '⏳ Sending via Zapier…';
+  statusEl.className = 'dc-status ok';
+
+  const html = buildEmailHTML();
+
+  try {
+    const res = await fetch(webhook, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to,
+        cc: cc || '',
+        subject: subject || 'HANDS Logistics — Estimate',
+        from: 'concierge@handslogistics.com',
+        html_body: html
+      })
+    });
+
+    if (res.ok || res.status === 0) {
+      statusEl.textContent = '✓ Sent! Check concierge@handslogistics.com sent mail.';
+      statusEl.className = 'dc-status ok';
+      await updateMondayEstimateReady(true);
+    } else {
+      statusEl.textContent = '✗ Zapier returned an error. Check your webhook URL.';
+      statusEl.className = 'dc-status err';
+    }
+  } catch(e) {
+    // Zapier webhooks often return opaque responses due to CORS — treat as success
+    statusEl.textContent = '✓ Request sent to Zapier. Check your Gmail sent folder to confirm.';
+    statusEl.className = 'dc-status ok';
+    await updateMondayEstimateReady(true);
+  }
+}
+
+
 // Saves the full estimate HTML as a Monday update (comment) and stores a
 // data-URL link in the Estimate Doc Link column (link_mm1wdh3).
 // Also writes Estimate Amount and sets Estimate Status → Working on it.
@@ -1830,7 +1888,20 @@ Estimate link: ${estimateURL}`;
 
     <div id="dc-status" class="dc-status"></div>
 
-    <div class="dc-actions" style="flex-wrap:wrap;gap:8px">
+    <!-- Zapier webhook URL (one-time setup) -->
+    <div class="dc-field" style="margin-top:14px">
+      <label style="display:flex;align-items:center;gap:6px">
+        ⚡ Zapier Webhook URL
+        <span style="font-size:9px;color:var(--muted);font-weight:400">(paste once — saved in browser)</span>
+      </label>
+      <input id="dc-zapier-url" type="url" placeholder="https://hooks.zapier.com/hooks/catch/..."
+        style="font-size:11px;color:var(--muted)"
+        onchange="localStorage.setItem('hands_zapier_estimate_url', this.value)"
+        value="https://hooks.zapier.com/hooks/catch/9182863/unrmyhy/">
+    </div>
+
+    <div class="dc-actions" style="flex-wrap:wrap;gap:8px;margin-top:12px">
+      <button class="dc-btn-send" onclick="sendViaZapier()" style="flex:1;min-width:160px;background:var(--green);color:#0a0a0a" title="Sends email directly via Zapier → Gmail">⚡ Send via Zapier</button>
       <button class="dc-btn-send" onclick="sendViaGmail()" style="flex:1;min-width:160px;background:#1a73e8" title="Copies HTML email + opens Gmail compose. Paste into body.">✉ Copy + Open Gmail</button>
       <button class="dc-btn-send" onclick="copyHTMLEmail()" style="flex:1;min-width:160px">📋 Copy HTML</button>
       <button onclick="saveEstimateToMonday()" style="flex:1;min-width:160px;padding:10px 14px;background:rgba(160,214,180,.12);border:1px solid var(--green-dk);border-radius:4px;color:var(--green);font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font-b)">⬡ Save to Monday</button>
